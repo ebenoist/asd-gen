@@ -1,0 +1,83 @@
+#!/usr/bin/env ruby
+
+
+# lexing
+# find_each_file in parallel
+#   -> for each file find a doc block
+#   -> ship doc block (async) to object builder/collector
+#
+# writing
+# no == spool entire file into memory and dump.
+
+
+require "file"
+
+module ASD
+  # do each file in parallel
+  def run!
+    files = File.glob("app/controllers/**/*.rb")
+    endpoint_collection = files.map do |file|
+      endpoints = build_endpoints(file)
+      EndpointCollection.new(endpoints, file.name)
+    end
+  end
+
+  private
+
+  def parse_endpoints(contents)
+    endpoints = []
+    while(file != EOF)
+      line = file.read_line
+      if line.matches(/@ENDPOINT/)
+        endpoint_line = file.read_line # if EOF raise error
+        endpoint_lines = []
+        while(endpoint_line != /@ENDPOINT/)
+          endpoint_lines << parse_endpoint_line(endpoint_line)
+        end
+        endpoints << Endpoint.new(endpoint_lines)
+      end
+    end
+  end
+
+  def parse_endpoint_line(line)
+    strip_comments!(line)
+    strip_whitespace!(line)
+    attribute, value = line.split(":")
+    attribute = EndpointAttribute.new(attribute, value)
+    attribute.validate!
+    attribute
+  end
+
+  class EndpointAttribute
+    def initialize(attribute, value)
+      @attribute = attribute
+      @value = value
+    end
+  end
+
+  class Endpoint
+    def initialize(attributes)
+      @attributes = attributes
+    end
+
+    def name
+      @attributes.detect { |attr| attr.name == :route }
+    end
+  end
+
+  class EndpointCollection
+    def initialized(endpoints, file)
+      @endpoints = endpoints
+      @file = file
+    end
+
+    def export!
+      discovery_file = {}.merge(bolier_plate)
+      discovery_file[:endpoints] = @endpoints.map do |endpoint|
+        { route: endpoint.route, params: endpoint.params, response: endpoint.response }
+      end
+
+      File.write("/tmp/discovery-#{sha}.json", JSON.dump(discovery_file))
+    end
+  end
+end
